@@ -251,6 +251,47 @@ export const RunCommand = cmd({
         return args.agent
       })()
 
+      // Validate model if specified
+      if (args.model) {
+        const parsed = Provider.parseModel(args.model)
+        try {
+          await Provider.getModel(parsed.providerID, parsed.modelID)
+        } catch (e) {
+          if (Provider.ModelNotFoundError.isInstance(e)) {
+            // Build helpful error message with suggestions from fuzzy matching
+            const { providerID, modelID, suggestions } = e.data
+            const modelStr = modelID ? `${providerID}/${modelID}` : providerID
+
+            let availableModels: string[] = []
+
+            if (modelID) {
+              // Provider exists but model not found - show fuzzy-matched model suggestions
+              availableModels = suggestions?.map((s) => `${providerID}/${s}`) || []
+            } else {
+              // Provider not found - show models from similar providers
+              const provider = await Provider.getProvider(providerID)
+              if (provider) {
+                availableModels = Object.keys(provider.models).map((m) => `${providerID}/${m}`)
+              } else if (suggestions?.length) {
+                for (const suggestedProvider of suggestions) {
+                  const p = await Provider.getProvider(suggestedProvider)
+                  if (p) {
+                    availableModels.push(...Object.keys(p.models).map((m) => `${suggestedProvider}/${m}`))
+                  }
+                }
+              }
+            }
+
+            UI.error([
+              `Model not found: ${modelStr}`,
+              ...(availableModels.length ? [`Available models:`, ...availableModels.map((m) => `  - ${m}`)] : []),
+              `Run "opencode models" to list all available models`,
+            ].join("\n"))
+            process.exit(1)
+          }
+        }
+      }
+
       if (args.command) {
         await sdk.session.command({
           sessionID,
